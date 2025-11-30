@@ -86,9 +86,21 @@ def prepare_response(df):
     df['fecha'] = df['fecha'].dt.strftime('%Y-%m-%d')
     df['Joker'] = df['Joker'].fillna('').astype(str).replace('nan', '')
     for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'C', 'R']:
-        df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
-    df = df.fillna('')
-    return df.to_dict(orient="records")
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Convertir a lista de diccionarios con tipos Python nativos
+    records = []
+    for _, row in df.iterrows():
+        record = {
+            'fecha': row['fecha'],
+            'dow_es': row['dow_es'],
+            'Joker': row['Joker'] if pd.notna(row['Joker']) else ''
+        }
+        for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'C', 'R']:
+            val = row[col]
+            record[col] = int(val) if pd.notna(val) else None
+        records.append(record)
+    return records
 
 @app.get("/", 
          summary="Información de la API",
