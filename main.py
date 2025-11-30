@@ -3,11 +3,62 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from typing import Optional, List, Dict
 from datetime import datetime
+from pydantic import BaseModel
+
+class SorteoResponse(BaseModel):
+    """Modelo de respuesta para un sorteo individual"""
+    fecha: str
+    dow_es: str
+    N1: Optional[int]
+    N2: Optional[int]
+    N3: Optional[int]
+    N4: Optional[int]
+    N5: Optional[int]
+    N6: Optional[int]
+    C: Optional[int]
+    R: Optional[int]
+    Joker: str
+
+class EstadisticasResponse(BaseModel):
+    """Modelo de respuesta para estadísticas generales"""
+    total_sorteos: int
+    fecha_inicio: str
+    fecha_fin: str
+    dias_semana: Dict[str, int]
+
+class FrecuenciaResponse(BaseModel):
+    """Modelo de respuesta para frecuencia de números"""
+    frecuencia: Dict[str, int]
 
 app = FastAPI(
     title="Lotto Data API",
-    description="API para acceder a datos históricos de lotería",
-    version="1.0.0"
+    description="""API REST para acceder a datos históricos de lotería española.
+    
+## Características
+
+- 🎲 **Sorteos históricos** desde 2013 hasta 2025
+- 📅 **Filtros por fecha** y períodos
+- 📊 **Estadísticas** y frecuencias de números
+- ⚡ **Respuestas rápidas** con datos optimizados
+    
+## Estructura de datos
+
+Cada sorteo contiene:
+- **fecha**: Fecha del sorteo (YYYY-MM-DD)
+- **dow_es**: Día de la semana en español
+- **N1-N6**: Números ganadores (1-49)
+- **C**: Complementario (0-49)
+- **R**: Reintegro (0-9)
+- **Joker**: Número Joker (opcional)
+    """,
+    version="1.0.0",
+    contact={
+        "name": "Lotto Data API",
+        "url": "https://github.com/tu-usuario/lotto-api",
+    },
+    license_info={
+        "name": "MIT",
+    },
 )
 
 CSV_FILE = "data/historico_clean.csv"
@@ -27,40 +78,101 @@ def load_data():
     df['fecha'] = pd.to_datetime(df['fecha'])
     return df.fillna("")
 
-@app.get("/")
+@app.get("/", 
+         summary="Información de la API",
+         description="Endpoint raíz que proporciona información básica de la API",
+         tags=["General"])
 def root():
-    return {"message": "Lotto Data API - Visita /docs para documentación"}
+    """Endpoint principal con información de la API"""
+    return {
+        "message": "Lotto Data API", 
+        "version": "1.0.0",
+        "docs": "/docs",
+        "endpoints": [
+            "/sorteos",
+            "/sorteos/recientes", 
+            "/numeros/frecuencia",
+            "/estadisticas",
+            "/sorteos/fecha/{fecha}"
+        ]
+    }
 
-@app.get("/sorteos")
-def get_sorteos(limit: Optional[int] = Query(100, description="Límite de registros")):
-    """Obtiene sorteos históricos"""
+@app.get("/sorteos", 
+         response_model=List[SorteoResponse],
+         summary="Obtener sorteos históricos",
+         description="Devuelve una lista de sorteos históricos con opción de limitar resultados",
+         tags=["Sorteos"])
+def get_sorteos(limit: Optional[int] = Query(100, ge=1, le=1000, description="Número máximo de sorteos a devolver (1-1000)")):
+    """Obtiene sorteos históricos ordenados por fecha descendente
+    
+    - **limit**: Número máximo de registros (por defecto 100, máximo 1000)
+    
+    Retorna lista de sorteos con todos los campos disponibles.
+    """
     df = load_data()
     if limit:
         df = df.head(limit)
     return df.to_dict(orient="records")
 
-@app.get("/sorteos/recientes")
-def get_sorteos_recientes(dias: int = Query(30, description="Últimos N días")):
-    """Sorteos de los últimos N días"""
+@app.get("/sorteos/recientes", 
+         response_model=List[SorteoResponse],
+         summary="Sorteos recientes",
+         description="Obtiene sorteos de los últimos N días",
+         tags=["Sorteos"])
+def get_sorteos_recientes(dias: int = Query(30, ge=1, le=365, description="Número de días hacia atrás desde la fecha más reciente (1-365)")):
+    """Obtiene sorteos de los últimos N días
+    
+    - **dias**: Número de días hacia atrás (por defecto 30, máximo 365)
+    
+    Calcula desde la fecha más reciente disponible en los datos.
+    """
     df = load_data()
     fecha_limite = df['fecha'].max() - pd.Timedelta(days=dias)
     df_recientes = df[df['fecha'] >= fecha_limite]
     return df_recientes.to_dict(orient="records")
 
-@app.get("/numeros/frecuencia")
+@app.get("/numeros/frecuencia", 
+         response_model=FrecuenciaResponse,
+         summary="Frecuencia de números",
+         description="Calcula la frecuencia de aparición de cada número en todos los sorteos",
+         tags=["Estadísticas"])
 def get_frecuencia_numeros():
-    """Frecuencia de aparición de números"""
+    """Calcula la frecuencia de aparición de cada número (1-49)
+    
+    Analiza todos los números ganadores (N1-N6) de todos los sorteos
+    y devuelve cuántas veces ha aparecido cada número.
+    
+    Útil para:
+    - Análisis estadístico
+    - Identificar números "calientes" y "fríos"
+    - Estrategias de juego
+    """
     df = load_data()
     numeros = []
     for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']:
-        numeros.extend(df[col].tolist())
+        numeros.extend(df[col].dropna().tolist())
     
-    frecuencia = pd.Series(numeros).value_counts().to_dict()
-    return {"frecuencia": frecuencia}
+    frecuencia = pd.Series(numeros).value_counts().sort_index().to_dict()
+    # Convertir claves a string para JSON
+    frecuencia_str = {str(k): v for k, v in frecuencia.items()}
+    return {"frecuencia": frecuencia_str}
 
-@app.get("/estadisticas")
+@app.get("/estadisticas", 
+         response_model=EstadisticasResponse,
+         summary="Estadísticas generales",
+         description="Proporciona estadísticas generales del conjunto de datos",
+         tags=["Estadísticas"])
 def get_estadisticas():
-    """Estadísticas generales"""
+    """Obtiene estadísticas generales del conjunto de datos
+    
+    Incluye:
+    - **total_sorteos**: Número total de sorteos disponibles
+    - **fecha_inicio**: Fecha del sorteo más antiguo
+    - **fecha_fin**: Fecha del sorteo más reciente
+    - **dias_semana**: Distribución de sorteos por día de la semana
+    
+    Útil para entender la cobertura y distribución de los datos.
+    """
     df = load_data()
     return {
         "total_sorteos": len(df),
@@ -69,15 +181,52 @@ def get_estadisticas():
         "dias_semana": df['dow_es'].value_counts().to_dict()
     }
 
-@app.get("/sorteos/fecha/{fecha}")
+@app.get("/sorteos/fecha/{fecha}", 
+         response_model=SorteoResponse,
+         summary="Sorteo por fecha",
+         description="Obtiene el sorteo de una fecha específica",
+         tags=["Sorteos"],
+         responses={
+             200: {
+                 "description": "Sorteo encontrado",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "fecha": "2025-11-29",
+                             "dow_es": "Sab",
+                             "N1": 20, "N2": 31, "N3": 35, "N4": 36, "N5": 37, "N6": 46,
+                             "C": 25, "R": 8, "Joker": "3068183"
+                         }
+                     }
+                 }
+             },
+             404: {"description": "No hay sorteo en esa fecha"},
+             400: {"description": "Formato de fecha inválido"}
+         })
 def get_sorteo_fecha(fecha: str):
-    """Sorteo por fecha específica (YYYY-MM-DD)"""
+    """Obtiene el sorteo de una fecha específica
+    
+    - **fecha**: Fecha en formato YYYY-MM-DD (ej: 2025-11-29)
+    
+    Retorna el sorteo completo si existe, o error 404 si no hay sorteo en esa fecha.
+    
+    **Ejemplos de fechas válidas:**
+    - 2025-11-29 (sorteo más reciente)
+    - 2014-01-02 
+    - 2013-01-03 (sorteo más antiguo)
+    """
     df = load_data()
     try:
         fecha_obj = datetime.strptime(fecha, "%Y-%m-%d")
         sorteo = df[df['fecha'].dt.date == fecha_obj.date()]
         if sorteo.empty:
-            raise HTTPException(status_code=404, detail="No hay sorteo en esa fecha")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No hay sorteo en la fecha {fecha}. Rango disponible: {df['fecha'].min().date()} - {df['fecha'].max().date()}"
+            )
         return sorteo.to_dict(orient="records")[0]
     except ValueError:
-        raise HTTPException(status_code=400, detail="Formato de fecha inválido (YYYY-MM-DD)")
+        raise HTTPException(
+            status_code=400, 
+            detail="Formato de fecha inválido. Use YYYY-MM-DD (ej: 2025-11-29)"
+        )

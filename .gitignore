@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+.lotto_env/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+lotto_downloader/
+lotto_transformer/
+*.py
+!main.py
+requirements_downloader.txt
+setup*.py
+test_*.py
+*_test.py
+example_*.py
+download_*.py
+full_*.py
+run.py
+start_*.py
+csv_transformer.py
+README*.md
+EJECUCION.md
+API_DOCS.md
