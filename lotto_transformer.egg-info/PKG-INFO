@@ -1,0 +1,76 @@
+Metadata-Version: 2.4
+Name: lotto-transformer
+Version: 1.0.0
+Summary: Transformador de datos históricos de lotería
+Author: Tu Nombre
+Author-email: tu.email@ejemplo.com
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Requires-Dist: pandas>=1.3.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# Lotto Transformer
+
+Módulo Python para transformar datos históricos de lotería de formato raw a formato clean.
+
+## Instalación
+
+```bash
+pip install -e .
+```
+
+## Uso
+
+### Como módulo Python
+
+```python
+from lotto_transformer import LottoTransformer
+
+transformer = LottoTransformer()
+transformer.transform('data/historico_raw.csv', 'data/historico_clean.csv')
+```
+
+### Desde línea de comandos
+
+```bash
+lotto-transform data/historico_raw.csv data/historico_clean.csv
+```
+
+## Transformaciones realizadas
+
+- Convierte fechas del formato `Jue-17-10-1985` a `1985-10-17`
+- Extrae el día de la semana en español
+- Limpia valores numéricos eliminando espacios
+- Mantiene campos vacíos como cadenas vacías
+- Genera CSV con encoding UTF-8
+
+## Estructura de datos
+
+### Entrada (raw)
+```
+FECHA; N1;N2;N3;N4;N5;N6;C;R;Joker;...
+Jue-17-10-1985 ; 3;11;13;15;34;35;27;0;;...
+```
+
+### Salida (clean)
+```
+fecha,dow_es,N1,N2,N3,N4,N5,N6,C,R,Joker
+1985-10-17,Jue,3,11,13,15,34,35,27,0,
+```

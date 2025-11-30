@@ -1,0 +1,2 @@
+[console_scripts]
+lotto-transform = lotto_transformer.cli:main

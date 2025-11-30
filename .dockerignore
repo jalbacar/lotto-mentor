@@ -1,0 +1,12 @@
+.git
+.gitignore
+README*.md
+Dockerfile
+.dockerignore
+lotto_downloader/
+lotto_transformer/
+*.py
+!main.py
+!start_api.py
+logs/
+.lotto_env/
