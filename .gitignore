@@ -23,6 +23,7 @@ lotto_downloader/
 lotto_transformer/
 *.py
 !main.py
+!server.py
 requirements_downloader.txt
 setup*.py
 test_*.py
@@ -32,6 +33,7 @@ download_*.py
 full_*.py
 run.py
 start_*.py
+start.sh
 csv_transformer.py
 README*.md
 EJECUCION.md
