@@ -76,14 +76,18 @@ check_csv_exists()
 def load_data():
     check_csv_exists()
     df = pd.read_csv(CSV_FILE)
-    df['fecha'] = pd.to_datetime(df['fecha'])
-    return df.fillna("")
+    df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
+    df = df.dropna(subset=['fecha'])
+    return df
 
 def prepare_response(df):
     """Convierte DataFrame a formato compatible con Pydantic"""
     df = df.copy()
     df['fecha'] = df['fecha'].dt.strftime('%Y-%m-%d')
-    df['Joker'] = df['Joker'].astype(str)
+    df['Joker'] = df['Joker'].fillna('').astype(str).replace('nan', '')
+    for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'C', 'R']:
+        df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+    df = df.fillna('')
     return df.to_dict(orient="records")
 
 @app.get("/", 
@@ -158,7 +162,7 @@ def get_frecuencia_numeros():
     df = load_data()
     numeros = []
     for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']:
-        numeros.extend(df[col].dropna().tolist())
+        numeros.extend(pd.to_numeric(df[col], errors='coerce').dropna().tolist())
     
     frecuencia = pd.Series(numeros).value_counts().sort_index().to_dict()
     # Convertir claves a string para JSON
