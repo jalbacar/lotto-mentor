@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Query
 from typing import Optional, List, Dict
 from datetime import datetime
 from pydantic import BaseModel
+import uvicorn
 
 class SorteoResponse(BaseModel):
     """Modelo de respuesta para un sorteo individual"""
@@ -230,3 +231,7 @@ def get_sorteo_fecha(fecha: str):
             status_code=400, 
             detail="Formato de fecha inválido. Use YYYY-MM-DD (ej: 2025-11-29)"
         )
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
