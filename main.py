@@ -79,6 +79,13 @@ def load_data():
     df['fecha'] = pd.to_datetime(df['fecha'])
     return df.fillna("")
 
+def prepare_response(df):
+    """Convierte DataFrame a formato compatible con Pydantic"""
+    df = df.copy()
+    df['fecha'] = df['fecha'].dt.strftime('%Y-%m-%d')
+    df['Joker'] = df['Joker'].astype(str)
+    return df.to_dict(orient="records")
+
 @app.get("/", 
          summary="Información de la API",
          description="Endpoint raíz que proporciona información básica de la API",
@@ -113,7 +120,7 @@ def get_sorteos(limit: Optional[int] = Query(100, ge=1, le=1000, description="N�
     df = load_data()
     if limit:
         df = df.head(limit)
-    return df.to_dict(orient="records")
+    return prepare_response(df)
 
 @app.get("/sorteos/recientes", 
          response_model=List[SorteoResponse],
@@ -130,7 +137,7 @@ def get_sorteos_recientes(dias: int = Query(30, ge=1, le=365, description="Núme
     df = load_data()
     fecha_limite = df['fecha'].max() - pd.Timedelta(days=dias)
     df_recientes = df[df['fecha'] >= fecha_limite]
-    return df_recientes.to_dict(orient="records")
+    return prepare_response(df_recientes)
 
 @app.get("/numeros/frecuencia", 
          response_model=FrecuenciaResponse,
@@ -225,7 +232,7 @@ def get_sorteo_fecha(fecha: str):
                 status_code=404, 
                 detail=f"No hay sorteo en la fecha {fecha}. Rango disponible: {df['fecha'].min().date()} - {df['fecha'].max().date()}"
             )
-        return sorteo.to_dict(orient="records")[0]
+        return prepare_response(sorteo)[0]
     except ValueError:
         raise HTTPException(
             status_code=400, 
