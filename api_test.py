@@ -1,83 +1,82 @@
-#!/usr/bin/env python3
-"""Script para probar la API de lotería"""
-
 import requests
 import json
-from datetime import datetime, timedelta
+import time
 
 BASE_URL = "http://localhost:8000"
 
-def test_api():
-    """Prueba todos los endpoints de la API"""
-    
-    # Usar fechas reales del CSV actual (2013-2025)
-    endpoints = [
-        "/",
-        "/sorteos?limit=3",
-        "/sorteos/recientes?dias=30", 
-        "/numeros/frecuencia",
-        "/estadisticas",
-        "/sorteos/fecha/2025-11-29",  # Fecha real del CSV
-        "/sorteos/fecha/2014-01-02"   # Otra fecha real
-    ]
-    
-    print("🧪 Probando API de Lotería...")
-    
-    for endpoint in endpoints:
-        try:
-            response = requests.get(f"{BASE_URL}{endpoint}")
-            print(f"\n✅ {endpoint}")
-            print(f"Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    print(f"Registros: {len(data)}")
-                    if data and len(data) > 0:
-                        print(f"Primer registro: {data[0]}")
-                elif isinstance(data, dict):
-                    print(f"Claves: {list(data.keys())}")
-                    # Mostrar algunos valores para verificar
-                    if 'frecuencia' in data:
-                        freq = data['frecuencia']
-                        top_nums = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:5]
-                        print(f"Top 5 números: {top_nums}")
-                    elif 'total_sorteos' in data:
-                        print(f"Total sorteos: {data['total_sorteos']}")
-                        print(f"Rango fechas: {data.get('fecha_inicio')} - {data.get('fecha_fin')}")
-            else:
-                print(f"Error: {response.text}")
-                
-        except requests.exceptions.ConnectionError:
-            print(f"❌ {endpoint}: API no disponible. ¿Está ejecutándose el servidor?")
-        except Exception as e:
-            print(f"❌ {endpoint}: {e}")
-    
-    print("\n📊 Resumen de pruebas completado")
+def log_test(name, result, time_taken=None):
+    status = "✅ PASS" if result else "❌ FAIL"
+    time_str = f" ({time_taken:.2f}s)" if time_taken is not None else ""
+    print(f"{status} - {name}{time_str}")
 
-def test_specific_features():
-    """Pruebas específicas de funcionalidades"""
-    print("\n🔍 Pruebas específicas...")
-    
-    # Test de límites
+def test_root():
+    start = time.time()
     try:
-        response = requests.get(f"{BASE_URL}/sorteos?limit=1")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Límite funciona: {len(data)} registro(s)")
-    except:
-        print("❌ Error en test de límite")
-    
-    # Test de fecha inválida
+        response = requests.get(f"{BASE_URL}/")
+        assert response.status_code == 200
+        data = response.json()
+        log_test("Root Endpoint", True, time.time() - start)
+    except Exception as e:
+        print(f"Error in root: {e}")
+        log_test("Root Endpoint", False)
+
+def test_health():
+    start = time.time()
     try:
-        response = requests.get(f"{BASE_URL}/sorteos/fecha/2000-01-01")
-        if response.status_code == 404:
-            print("✅ Manejo correcto de fecha inexistente")
-        else:
-            print(f"⚠️ Fecha inexistente retornó: {response.status_code}")
-    except:
-        print("❌ Error en test de fecha inválida")
+        response = requests.get(f"{BASE_URL}/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        log_test("Health Check", True, time.time() - start)
+    except Exception as e:
+        print(f"Error in health: {e}")
+        log_test("Health Check", False)
+
+def test_predict_get():
+    start = time.time()
+    try:
+        response = requests.get(f"{BASE_URL}/predict")
+        assert response.status_code == 200
+        data = response.json()
+        assert "top_numbers" in data
+        assert len(data["top_numbers"]) == 15
+        log_test("GET /predict (Defaults)", True, time.time() - start)
+    except Exception as e:
+        print(f"Error in GET /predict: {e}")
+        log_test("GET /predict", False)
+
+def test_user_predict_post():
+    start = time.time()
+    try:
+        payload = {"top_n": 10, "n_combinations": 5}
+        response = requests.post(f"{BASE_URL}/user/predict", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["top_numbers"]) == 10
+        log_test("POST /user/predict", True, time.time() - start)
+    except Exception as e:
+        print(f"Error in POST /user/predict: {e}")
+        log_test("POST /user/predict", False)
+
+def test_admin_retrain():
+    start = time.time()
+    try:
+        response = requests.post(f"{BASE_URL}/admin/retrain")
+        assert response.status_code == 200
+        log_test("POST /admin/retrain", True, time.time() - start)
+    except Exception as e:
+        print(f"Error in POST /admin/retrain: {e}")
+        log_test("POST /admin/retrain", False)
 
 if __name__ == "__main__":
-    test_api()
-    test_specific_features()
+    print(f"Testing API at {BASE_URL}...\n")
+    try:
+        requests.get(BASE_URL)
+        test_root()
+        test_health()
+        test_predict_get()
+        test_user_predict_post()
+        test_admin_retrain()
+        print("\nAll tests completed.")
+    except Exception as e:
+        print(f"❌ Error: Could not connect to {BASE_URL}. Is the server running?")
