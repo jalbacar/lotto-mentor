@@ -24,6 +24,7 @@ lotto_transformer/
 *.py
 !main.py
 !server.py
+!api_test.py
 requirements_downloader.txt
 setup*.py
 test_*.py
@@ -37,4 +38,4 @@ start.sh
 csv_transformer.py
 README*.md
 EJECUCION.md
-API_DOCS.md
+API_DOCS.md!api_test.py

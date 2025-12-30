@@ -1,260 +1,203 @@
 import os
+import random
+import logging
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
-from typing import Optional, List, Dict
+from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel
-import uvicorn
+from contextlib import asynccontextmanager
 
-class SorteoResponse(BaseModel):
-    """Modelo de respuesta para un sorteo individual"""
-    fecha: str
-    dow_es: str
-    N1: Optional[int]
-    N2: Optional[int]
-    N3: Optional[int]
-    N4: Optional[int]
-    N5: Optional[int]
-    N6: Optional[int]
-    C: Optional[int]
-    R: Optional[int]
-    Joker: str
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from pydantic import BaseModel, Field
 
-class EstadisticasResponse(BaseModel):
-    """Modelo de respuesta para estadísticas generales"""
-    total_sorteos: int
-    fecha_inicio: str
-    fecha_fin: str
-    dias_semana: Dict[str, int]
+# Configuración de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("lotto_api")
 
-class FrecuenciaResponse(BaseModel):
-    """Modelo de respuesta para frecuencia de números"""
-    frecuencia: Dict[str, int]
+# Constantes
+CSV_FILE = "data/historico_clean.csv"
+MODEL_DIR = "models"
+STAT_FILE = "data/statistical_data.pkl"
+
+# --- Pydantic Models (según openapi.json) ---
+
+class NumberPrediction(BaseModel):
+    number: int = Field(..., title="Number", description="Número de lotería (1-49)")
+    score: float = Field(..., title="Score", description="Puntuación combinada")
+    lstm_score: float = Field(..., title="Lstm Score", description="Puntuación del modelo LSTM")
+    stat_score: float = Field(..., title="Stat Score", description="Puntuación estadística")
+
+class PredictionResponse(BaseModel):
+    top_numbers: List[NumberPrediction] = Field(..., title="Top Numbers")
+    combinations: List[List[int]] = Field(..., title="Combinations")
+    metadata: Dict[str, Any] = Field(..., title="Metadata")
+
+class UserPredictionRequest(BaseModel):
+    top_n: int = Field(15, title="Top N")
+    n_combinations: int = Field(10, title="N Combinations")
+
+# --- Lógica de Negocio / Mock Engine ---
+
+class PredictionEngine:
+    def __init__(self):
+        self.stats = {}
+        self.is_loaded = False
+
+    def load_models(self):
+        """
+        Carga los modelos LSTM y los datos estadísticos.
+        En esta implementación base, calculamos estadísticas desde el CSV si no hay pkl.
+        """
+        logger.info("Cargando modelos y datos estadísticos...")
+        try:
+            # Simulación de carga de modelos LSTM
+            # self.lstm_models = [load_model(f"lstm_model_{i}.keras") for i in range(1, 6)]
+            self.load_statistics()
+            self.is_loaded = True
+            logger.info("Sistema de predicción listo.")
+        except Exception as e:
+            logger.error(f"Error cargando modelos: {e}")
+            self.is_loaded = False
+
+    def load_statistics(self):
+        """Carga o calcula estadísticas básicas del CSV"""
+        if os.path.exists(CSV_FILE):
+            df = pd.read_csv(CSV_FILE)
+            # Calcular frecuencia simple como 'stat_score' base
+            numeros = []
+            for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']:
+                numeros.extend(pd.to_numeric(df[col], errors='coerce').dropna().tolist())
+            
+            freq_series = pd.Series(numeros).value_counts(normalize=True)
+            self.stats = freq_series.to_dict()
+        else:
+            logger.warning("No se encontró archivo CSV para estadísticas.")
+            self.stats = {}
+
+    def predict(self, top_n: int = 15, n_combinations: int = 10) -> PredictionResponse:
+        if not self.is_loaded:
+            self.load_models()
+
+        # Generar predicciones para todos los números (1-49)
+        all_preds = []
+        for num in range(1, 50):
+            # Obtener estadisticas reales
+            stat_score = self.stats.get(float(num), 0.0)
+            
+            # Simular LSTM score (0 a 1)
+            # TODO: Reemplazar con inferencia real de LSTM
+            lstm_score = random.random() * 0.5 
+            
+            # Weighted Fusion (60% LSTM + 40% Stat) según arquitectura
+            # Ajustamos escalas para que sean comparables
+            # Stat score suele ser bajo (ej 0.02), normalizamos un poco para el ejemplo
+            norm_stat = stat_score * 10  # Factor de escala arbitrario para demo
+            
+            final_score = (0.6 * lstm_score) + (0.4 * norm_stat)
+            
+            all_preds.append(NumberPrediction(
+                number=num,
+                score=round(final_score, 4),
+                lstm_score=round(lstm_score, 4),
+                stat_score=round(stat_score, 6)
+            ))
+        
+        # Ordenar por score descendente
+        all_preds.sort(key=lambda x: x.score, reverse=True)
+        top_numbers = all_preds[:top_n]
+        
+        # Generar combinaciones basadas en los top numbers
+        # Estrategia simple: Sampling ponderado o aleatorio de los top N
+        combinations = []
+        top_nums_list = [p.number for p in top_numbers]
+        
+        if len(top_nums_list) >= 6:
+            for _ in range(n_combinations):
+                # Elegir 6 números al azar de los top_n
+                combo = sorted(random.sample(top_nums_list, min(6, len(top_nums_list))))
+                combinations.append(combo)
+        
+        return PredictionResponse(
+            top_numbers=top_numbers,
+            combinations=combinations,
+            metadata={
+                "timestamp": datetime.now().isoformat(),
+                "model_version": "1.0.0",
+                "total_candidates": len(all_preds)
+            }
+        )
+
+    def retrain(self):
+        """Simula el reentrenamiento o recarga de datos"""
+        logger.info("Iniciando proceso de reentrenamiento/recarga...")
+        self.load_models()
+        return {"status": "success", "message": "Datos recargados y estadísticas actualizadas"}
+
+# Instancia global del motor
+engine = PredictionEngine()
+
+# --- FastAPI App ---
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Cargar modelos al inicio
+    engine.load_models()
+    yield
+    # Limpieza al apagar
 
 app = FastAPI(
-    title="Lotto Data API",
-    description="""API REST para acceder a datos históricos de lotería española.
-    
-## Características
-
-- 🎲 **Sorteos históricos** desde 2013 hasta 2025
-- 📅 **Filtros por fecha** y períodos
-- 📊 **Estadísticas** y frecuencias de números
-- ⚡ **Respuestas rápidas** con datos optimizados
-    
-## Estructura de datos
-
-Cada sorteo contiene:
-- **fecha**: Fecha del sorteo (YYYY-MM-DD)
-- **dow_es**: Día de la semana en español
-- **N1-N6**: Números ganadores (1-49)
-- **C**: Complementario (0-49)
-- **R**: Reintegro (0-9)
-- **Joker**: Número Joker (opcional)
-    """,
+    title="Lotería Primitiva Prediction API",
+    description="AI-powered lottery number predictions using LSTM + Statistics",
     version="1.0.0",
-    contact={
-        "name": "Lotto Data API",
-        "url": "https://github.com/tu-usuario/lotto-api",
-    },
-    license_info={
-        "name": "MIT",
-    },
+    lifespan=lifespan
 )
 
-CSV_FILE = "data/historico_clean.csv"
+# --- Endpoints ---
 
-def check_csv_exists():
-    if not os.path.exists(CSV_FILE):
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Archivo {CSV_FILE} no encontrado. Ejecute el pipeline de datos primero."
-        )
-
-check_csv_exists()
-
-def load_data():
-    check_csv_exists()
-    df = pd.read_csv(CSV_FILE)
-    df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce')
-    df = df.dropna(subset=['fecha'])
-    return df
-
-def prepare_response(df):
-    """Convierte DataFrame a formato compatible con Pydantic"""
-    df = df.copy()
-    df['fecha'] = df['fecha'].dt.strftime('%Y-%m-%d')
-    df['Joker'] = df['Joker'].fillna('').astype(str).replace('nan', '')
-    for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'C', 'R']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Convertir a lista de diccionarios con tipos Python nativos
-    records = []
-    for _, row in df.iterrows():
-        record = {
-            'fecha': row['fecha'],
-            'dow_es': row['dow_es'],
-            'Joker': row['Joker'] if pd.notna(row['Joker']) else ''
-        }
-        for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6', 'C', 'R']:
-            val = row[col]
-            record[col] = int(val) if pd.notna(val) else None
-        records.append(record)
-    return records
-
-@app.get("/", 
-         summary="Información de la API",
-         description="Endpoint raíz que proporciona información básica de la API",
-         tags=["General"])
+@app.get("/", summary="Root", description="API information endpoint")
 def root():
-    """Endpoint principal con información de la API"""
     return {
-        "message": "Lotto Data API", 
+        "name": "Lotería Primitiva Prediction API",
         "version": "1.0.0",
-        "docs": "/docs",
-        "endpoints": [
-            "/sorteos",
-            "/sorteos/recientes", 
-            "/numeros/frecuencia",
-            "/estadisticas",
-            "/sorteos/fecha/{fecha}"
-        ]
+        "status": "online",
+        "docs_url": "/docs"
     }
 
-@app.get("/sorteos", 
-         response_model=List[SorteoResponse],
-         summary="Obtener sorteos históricos",
-         description="Devuelve una lista de sorteos históricos con opción de limitar resultados",
-         tags=["Sorteos"])
-def get_sorteos(limit: Optional[int] = Query(100, ge=1, le=1000, description="Número máximo de sorteos a devolver (1-1000)")):
-    """Obtiene sorteos históricos ordenados por fecha descendente
-    
-    - **limit**: Número máximo de registros (por defecto 100, máximo 1000)
-    
-    Retorna lista de sorteos con todos los campos disponibles.
-    """
-    df = load_data()
-    if limit:
-        df = df.head(limit)
-    return prepare_response(df)
+@app.get("/health", summary="Health Check")
+def health_check():
+    return {"status": "ok", "engine_loaded": engine.is_loaded}
 
-@app.get("/sorteos/recientes", 
-         response_model=List[SorteoResponse],
-         summary="Sorteos recientes",
-         description="Obtiene sorteos de los últimos N días",
-         tags=["Sorteos"])
-def get_sorteos_recientes(dias: int = Query(30, ge=1, le=365, description="Número de días hacia atrás desde la fecha más reciente (1-365)")):
-    """Obtiene sorteos de los últimos N días
-    
-    - **dias**: Número de días hacia atrás (por defecto 30, máximo 365)
-    
-    Calcula desde la fecha más reciente disponible en los datos.
+@app.get("/predict", response_model=PredictionResponse, summary="Predict Lottery")
+def predict_lottery(
+    top_n: int = Query(15, title="Top N", description="Number of top predictions to return"),
+    n_combinations: int = Query(10, title="N Combinations", description="Number of lottery combinations to generate")
+):
     """
-    df = load_data()
-    fecha_limite = df['fecha'].max() - pd.Timedelta(days=dias)
-    df_recientes = df[df['fecha'] >= fecha_limite]
-    return prepare_response(df_recientes)
+    Get lottery number predictions.
+    
+    Parameters:
+    - **top_n**: Number of top numbers to return.
+    - **n_combinations**: Number of combinations to generate from those numbers.
+    """
+    return engine.predict(top_n=top_n, n_combinations=n_combinations)
 
-@app.get("/numeros/frecuencia", 
-         response_model=FrecuenciaResponse,
-         summary="Frecuencia de números",
-         description="Calcula la frecuencia de aparición de cada número en todos los sorteos",
-         tags=["Estadísticas"])
-def get_frecuencia_numeros():
-    """Calcula la frecuencia de aparición de cada número (1-49)
-    
-    Analiza todos los números ganadores (N1-N6) de todos los sorteos
-    y devuelve cuántas veces ha aparecido cada número.
-    
-    Útil para:
-    - Análisis estadístico
-    - Identificar números "calientes" y "fríos"
-    - Estrategias de juego
+@app.post("/user/predict", response_model=PredictionResponse, summary="User Predict")
+def user_predict(request: UserPredictionRequest):
     """
-    df = load_data()
-    numeros = []
-    for col in ['N1', 'N2', 'N3', 'N4', 'N5', 'N6']:
-        numeros.extend(pd.to_numeric(df[col], errors='coerce').dropna().tolist())
-    
-    frecuencia = pd.Series(numeros).value_counts().sort_index().to_dict()
-    # Convertir claves a string para JSON
-    frecuencia_str = {str(k): v for k, v in frecuencia.items()}
-    return {"frecuencia": frecuencia_str}
+    User-facing prediction endpoint.
+    """
+    return engine.predict(top_n=request.top_n, n_combinations=request.n_combinations)
 
-@app.get("/estadisticas", 
-         response_model=EstadisticasResponse,
-         summary="Estadísticas generales",
-         description="Proporciona estadísticas generales del conjunto de datos",
-         tags=["Estadísticas"])
-def get_estadisticas():
-    """Obtiene estadísticas generales del conjunto de datos
-    
-    Incluye:
-    - **total_sorteos**: Número total de sorteos disponibles
-    - **fecha_inicio**: Fecha del sorteo más antiguo
-    - **fecha_fin**: Fecha del sorteo más reciente
-    - **dias_semana**: Distribución de sorteos por día de la semana
-    
-    Útil para entender la cobertura y distribución de los datos.
+@app.post("/admin/retrain", summary="Admin Retrain")
+def admin_retrain(background_tasks: BackgroundTasks):
     """
-    df = load_data()
-    return {
-        "total_sorteos": len(df),
-        "fecha_inicio": df['fecha'].min().isoformat(),
-        "fecha_fin": df['fecha'].max().isoformat(),
-        "dias_semana": df['dow_es'].value_counts().to_dict()
-    }
-
-@app.get("/sorteos/fecha/{fecha}", 
-         response_model=SorteoResponse,
-         summary="Sorteo por fecha",
-         description="Obtiene el sorteo de una fecha específica",
-         tags=["Sorteos"],
-         responses={
-             200: {
-                 "description": "Sorteo encontrado",
-                 "content": {
-                     "application/json": {
-                         "example": {
-                             "fecha": "2025-11-29",
-                             "dow_es": "Sab",
-                             "N1": 20, "N2": 31, "N3": 35, "N4": 36, "N5": 37, "N6": 46,
-                             "C": 25, "R": 8, "Joker": "3068183"
-                         }
-                     }
-                 }
-             },
-             404: {"description": "No hay sorteo en esa fecha"},
-             400: {"description": "Formato de fecha inválido"}
-         })
-def get_sorteo_fecha(fecha: str):
-    """Obtiene el sorteo de una fecha específica
-    
-    - **fecha**: Fecha en formato YYYY-MM-DD (ej: 2025-11-29)
-    
-    Retorna el sorteo completo si existe, o error 404 si no hay sorteo en esa fecha.
-    
-    **Ejemplos de fechas válidas:**
-    - 2025-11-29 (sorteo más reciente)
-    - 2014-01-02 
-    - 2013-01-03 (sorteo más antiguo)
+    Trigger data refresh / retraining.
+    Reloads statistical data and recomputes scores.
     """
-    df = load_data()
-    try:
-        fecha_obj = datetime.strptime(fecha, "%Y-%m-%d")
-        sorteo = df[df['fecha'].dt.date == fecha_obj.date()]
-        if sorteo.empty:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No hay sorteo en la fecha {fecha}. Rango disponible: {df['fecha'].min().date()} - {df['fecha'].max().date()}"
-            )
-        return prepare_response(sorteo)[0]
-    except ValueError:
-        raise HTTPException(
-            status_code=400, 
-            detail="Formato de fecha inválido. Use YYYY-MM-DD (ej: 2025-11-29)"
-        )
+    # Ejecutar en background para no bloquear
+    background_tasks.add_task(engine.retrain)
+    return {"message": "Retraining started in background"}
 
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
